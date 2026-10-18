@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leoverse Contacts</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #f2f2f7;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+    </style>
+</head>
+<body class="text-gray-900 antialiased min-h-screen pb-12">
+
+    <!-- Header / Navbar -->
+    <header class="bg-white/80 backdrop-blur-md sticky top-0 z-50 border-b border-gray-200">
+        <div class="max-w-4xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <h1 class="text-2xl font-bold tracking-tight text-black">Leoverse Contacts</h1>
+            
+            <!-- Controls -->
+            <div class="flex items-center gap-3 w-full sm:w-auto">
+                <label class="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-xl transition shadow-sm">
+                    Import VCF/CSV
+                    <input type="file" id="fileInput" accept=".vcf,.csv" class="hidden" multiple>
+                </label>
+                <button id="exportBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 text-sm font-medium px-4 py-2 rounded-xl transition">
+                    Export Selected
+                </button>
+            </div>
+        </div>
+        
+        <!-- Search & Selection Bar -->
+        <div class="max-w-4xl mx-auto px-4 pb-3 flex items-center justify-between gap-4">
+            <input type="text" id="searchInput" placeholder="Search contacts..." 
+                class="w-full bg-gray-100 border border-gray-300 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button id="selectAllBtn" class="text-blue-600 text-sm font-medium whitespace-nowrap hover:underline">
+                Select All
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-4xl mx-auto px-4 mt-6">
+        <div id="contactCount" class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+            No Contacts Loaded
+        </div>
+        
+        <!-- Contacts Grid / Cards -->
+        <div id="contactsContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <!-- Cards will be injected here dynamically -->
+        </div>
+    </main>
+
+    <!-- JavaScript Logic -->
+    <script>
+        let contacts = [];
+
+        document.getElementById('fileInput').addEventListener('change', handleFileImport);
+        document.getElementById('searchInput').addEventListener('input', renderContacts);
+        document.getElementById('selectAllBtn').addEventListener('click', toggleSelectAll);
+        document.getElementById('exportBtn').addEventListener('click', exportSelectedContacts);
+
+        function handleFileImport(e) {
+            const files = e.target.files;
+            if (!files.length) return;
+
+            let loadedCount = 0;
+            for (let file of files) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    const content = event.target.result;
+                    if (file.name.endsWith('.vcf')) {
+                        parseVCF(content);
+                    } else if (file.name.endsWith('.csv')) {
+                        parseCSV(content);
+                    }
+                    loadedCount++;
+                    if (loadedCount === files.length) {
+                        mergeDuplicates();
+                        renderContacts();
+                    }
+                };
+                reader.readAsText(file);
+            }
+        }
+
+        function parseVCF(data) {
+            const cards = data.split('END:VCARD');
+            cards.forEach(card => {
+                if (!card.includes('BEGIN:VCARD')) return;
+                let name = 'Unknown';
+                let phones = [];
+
+                const lines = card.split(/\r?\n/);
+                lines.forEach(line => {
+                    if (line.startsWith('FN:')) {
+                        name = line.substring(3).trim();
+                    } else if (line.startsWith('N:')) {
+                        if (name === 'Unknown') {
+                            name = line.substring(2).replace(/;/g, ' ').trim();
+                        }
+                    } else if (line.includes('TEL')) {
+                        const parts = line.split(':');
+                        if (parts.length > 1) {
+                            let phone = parts[1].trim();
+                            if (phone && !phones.includes(phone)) phones.push(phone);
+                        }
+                    }
+                });
+
+                if (phones.length > 0) {
+                    contacts.push({ name, phones, selected: false });
+                }
+            });
+        }
+
+        function parseCSV(data) {
+            const lines = data.split(/\r?\n/);
+            // Simple CSV parsing assuming Name and Phone columns
+            lines.forEach((line, index) => {
+                if (index === 0 || !line.trim()) return; // Skip header
+                const cols = line.split(',');
+                if (cols.length >= 2) {
+                    const name = cols[0].replace(/['"]+/g, '').trim();
+                    const phone = cols[1].replace(/['"]+/g, '').trim();
+                    if (phone) {
+                        contacts.push({ name, phones: [phone], selected: false });
+                    }
+                }
+            });
+        }
+
+        function mergeDuplicates() {
+            const map = new Map();
+            contacts.forEach(c => {
+                // Normalize name or key
+                const key = c.name.toLowerCase();
+                if (map.has(key)) {
+                    let existing = map.get(key);
+                    c.phones.forEach(p => {
+                        if (!existing.phones.includes(p)) existing.phones.push(p);
+                    });
+                } else {
+                    map.set(key, { ...c });
+                }
+            });
+            contacts = Array.from(map.values());
+        }
+
+        function renderContacts() {
+            const container = document.getElementById('contactsContainer');
+            const searchQuery = document.getElementById('searchInput').value.toLowerCase();
+            container.innerHTML = '';
+
+            const filtered = contacts.filter(c => 
+                c.name.toLowerCase().includes(searchQuery) || 
+                c.phones.some(p => p.includes(searchQuery))
+            );
+
+            document.getElementById('contactCount').innerText = `${filtered.length} Contacts Found`;
+
+            if (filtered.length === 0) {
+                container.innerHTML = `<p class="text-gray-500 text-sm col-span-2 text-center py-8">No contacts found.</p>`;
+                return;
+            }
+
+            filtered.forEach((c, index) => {
+                const originalIndex = contacts.indexOf(c);
+                const card = document.createElement('div');
+                card.className = `bg-white p-4 rounded-2xl shadow-sm border transition flex items-center justify-between cursor-pointer ${c.selected ? 'border-blue-500 ring-2 ring-blue-100' : 'border-gray-200'}`;
+                card.onclick = () => toggleSelect(originalIndex);
+
+                card.innerHTML = `
+                    <div class="flex items-center gap-3 overflow-hidden">
+                        <div class="w-10 h-10 rounded-full bg-blue-100 text-blue-600 font-bold flex items-center justify-center shrink-0">
+                            ${c.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div class="truncate">
+                            <h3 class="font-semibold text-sm text-gray-900 truncate">${c.name}</h3>
+                            <p class="text-xs text-gray-500 truncate">${c.phones.join(', ')}</p>
+                        </div>
+                    </div>
+                    <input type="checkbox" ${c.selected ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" onclick="event.stopPropagation(); toggleSelect(${originalIndex})">
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function toggleSelect(index) {
+            contacts[index].selected = !contacts[index].selected;
+            renderContacts();
+        }
+
+        function toggleSelectAll() {
+            const allSelected = contacts.every(c => c.selected);
+            contacts.forEach(c => c.selected = !allSelected);
+            renderContacts();
+        }
+
+        function exportSelectedContacts() {
+            const selected = contacts.filter(c => c.selected);
+            if (selected.length === 0) {
+                alert('Pehle kuch contacts select kijiye!');
+                return;
+            }
+
+            let vcfContent = '';
+            selected.forEach(c => {
+                vcfContent += `BEGIN:VCARD\nVERSION:3.0\nFN:${c.name}\n`;
+                c.phones.forEach(p => {
+                    vcfContent += `TEL;TYPE=CELL:${p}\n`;
+                });
+                vcfContent += `END:VCARD\n`;
+            });
+
+            const blob = new Blob([vcfContent], { type: 'text/vcard' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'leoverse_exported_contacts.vcf';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
